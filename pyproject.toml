@@ -1,0 +1,72 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "vacancy-agent"
+version = "0.2.0"
+description = "Ежедневный поиск, фильтрация и анализ вакансий HeadHunter с доставкой в Telegram."
+requires-python = ">=3.12"
+readme = "README.md"
+dependencies = [
+    "pydantic>=2.9,<3",
+    "pydantic-settings>=2.5,<3",
+    "httpx>=0.27,<1",
+    "aiogram>=3.13,<4",
+    "apscheduler>=3.10,<4",
+    "fastapi>=0.115,<1",
+    "uvicorn>=0.30,<1",
+    "beautifulsoup4>=4.12,<5",
+    "psycopg[binary]>=3.2,<4",
+    "mcp[cli]>=2,<3",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3,<9",
+    "pytest-asyncio>=0.24,<1",
+    "ruff>=0.6,<1",
+    "mypy>=1.11,<2",
+]
+
+[project.scripts]
+vacancy-agent = "vacancy_agent.main:run"
+vacancy-agent-scheduler = "vacancy_agent.scheduler:main"
+vacancy-agent-api = "vacancy_agent.api.main:main"
+vacancy-agent-worker = "vacancy_agent.worker:main"
+vacancy-agent-eval-run = "vacancy_agent.evaluation.manual_run:main"
+vacancy-agent-eval-compare = "vacancy_agent.evaluation.compare:main"
+vacancy-agent-mcp = "vacancy_agent.mcp_main:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/vacancy_agent"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+pythonpath = ["src"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.ruff.lint.flake8-bugbear]
+# `Depends(...)` в значении по умолчанию — обязательная идиома FastAPI
+# (TASK-009, `docs/TASK-009.md`, dependency injection в routes), не
+# мутируемый объект, который B008 обычно предостерегает не переиспользовать
+# между вызовами.
+extend-immutable-calls = ["fastapi.Depends"]
+
+[tool.mypy]
+python_version = "3.12"
+mypy_path = "src"
+packages = ["vacancy_agent"]
+strict = true
+
+[[tool.mypy.overrides]]
+module = "apscheduler.*"
+ignore_missing_imports = true

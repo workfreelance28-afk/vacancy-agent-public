@@ -1,0 +1,81 @@
+name: vacancy-agent
+
+x-app-environment: &app-environment
+  DATABASE_URL: postgresql://vacancy_agent:${POSTGRES_PASSWORD:-local_only}@postgres:5432/vacancy_agent
+
+services:
+  postgres:
+    image: postgres:18.4-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15
+    environment:
+      POSTGRES_DB: vacancy_agent
+      POSTGRES_USER: vacancy_agent
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-local_only}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vacancy_agent -d vacancy_agent"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    volumes:
+      - postgres-data:/var/lib/postgresql
+    restart: unless-stopped
+
+  api:
+    image: vacancy-agent:local
+    build:
+      context: .
+    command: ["vacancy-agent-api"]
+    environment:
+      <<: *app-environment
+      API_HOST: 0.0.0.0
+      API_PORT: 8000
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import urllib.request;
+          urllib.request.urlopen('http://127.0.0.1:8000/api/v1/ready', timeout=2).read()
+      interval: 3s
+      timeout: 3s
+      retries: 30
+    ports:
+      - "${VACANCY_AGENT_API_PORT:-8000}:8000"
+    restart: unless-stopped
+
+  worker:
+    image: vacancy-agent:local
+    build:
+      context: .
+    command: ["vacancy-agent-worker"]
+    environment:
+      <<: *app-environment
+      VACANCY_SOURCE: superjob
+      SUPERJOB_API_KEY: ""
+      QWEN_MODEL: local-smoke-placeholder
+      QWEN_API_KEY: local
+      TELEGRAM_BOT_TOKEN: 1:local
+      TELEGRAM_ALLOWED_CHAT_IDS: "[]"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import os, psycopg;
+          connection = psycopg.connect(os.environ['DATABASE_URL']);
+          connection.execute('SELECT 1 FROM scan_jobs LIMIT 0');
+          connection.close()
+      interval: 3s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+volumes:
+  postgres-data:

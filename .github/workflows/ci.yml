@@ -1,0 +1,98 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18.4-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15
+        env:
+          POSTGRES_DB: vacancy_agent_test
+          POSTGRES_USER: vacancy_agent
+          POSTGRES_PASSWORD: ci_only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U vacancy_agent -d vacancy_agent_test"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 30
+    env:
+      TEST_DATABASE_URL: postgresql://vacancy_agent:ci_only@127.0.0.1:5432/vacancy_agent_test
+      TEST_DATABASE_URL_CONFIRM_DESTRUCTIVE: "1"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install project
+        run: python -m pip install --editable ".[dev]"
+      - name: Verify PostgreSQL test guard
+        run: >-
+          python -c "import os; assert os.environ['TEST_DATABASE_URL_CONFIRM_DESTRUCTIVE'] == '1';
+          assert 'test' in os.environ['TEST_DATABASE_URL'].rsplit('/', 1)[-1].lower()"
+      - name: Ruff
+        run: ruff check .
+      - name: Mypy
+        run: mypy
+      - name: Full test suite
+        run: pytest -q
+
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out full history
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+      - name: Scan tracked content and history
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_ENABLE_COMMENTS: "false"
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"
+          GITLEAKS_VERSION: "8.29.1"
+
+  eval-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install project
+        run: python -m pip install --editable ".[dev]"
+      - name: Verify offline evaluation and regression gate contracts
+        run: >-
+          python -m pytest -q
+          tests/unit/test_evaluation_compare.py
+          tests/unit/test_evaluation_gate.py
+          tests/unit/test_evaluation_metrics.py
+          tests/unit/test_evaluation_dataset.py
+          tests/unit/test_evaluation_prompt_fingerprint.py
+
+
+  container-smoke:
+    runs-on: ubuntu-latest
+    needs: [quality, secrets, eval-gate]
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Validate Compose configuration
+        run: docker compose config --quiet
+      - name: Build image and run two clean smoke starts
+        run: ./scripts/compose_smoke.sh
